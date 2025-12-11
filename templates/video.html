@@ -1,0 +1,29 @@
+{% extends "layout.html" %}
+{% block content %}
+
+<div class="section-card">
+  <h2>Analisis Video</h2>
+  <p>Unggah video ikan untuk mendapatkan anotasi dan log tiap frame.</p>
+
+  <form id="video-form" style="margin-top:10px;">
+    <input type="file" id="video-input" name="video">
+    <button id="btn-video">Proses Video</button>
+    <div id="video-status" class="status-box hidden"></div>
+  </form>
+</div>
+
+<!-- RINGKASAN VIDEO -->
+<div class="summary-grid">
+  <div class="summary-box">
+    <p id="video-summary"><strong>Belum ada data.</strong></p>
+    <a id="video-csv" class="btn-download" href="#">Download CSV</a>
+  </div>
+</div>
+
+<!-- PREVIEW VIDEO -->
+<div class="section-card">
+  <h3>Video Anotasi</h3>
+  <video id="video-preview" class="video-show" controls></video>
+</div>
+
+{% endblock %}

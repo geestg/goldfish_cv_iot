@@ -1,0 +1,51 @@
+{% extends "layout.html" %}
+{% block content %}
+
+<div class="section-card">
+  <h2>Analisis Gambar</h2>
+  <p>Unggah gambar ikan untuk mendeteksi jumlah dan mengukur panjang.</p>
+
+  <form id="image-form" style="margin-top:10px;">
+    <input type="file" id="image-input" name="image">
+    <button id="btn-image">Proses Gambar</button>
+    <div id="image-status" class="status-box hidden"></div>
+  </form>
+</div>
+
+<!-- RINGKASAN -->
+<div class="summary-grid">
+  <div class="summary-box" id="summary-box">
+    <p><strong>Belum ada data.</strong></p>
+  </div>
+
+  <div class="result-table">
+    <h3>Tabel Hasil</h3>
+    <table id="fish-table">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Confidence</th>
+          <th>Panjang (cm)</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+
+    <a id="csv-link" class="btn-download" href="#">Download CSV</a>
+  </div>
+</div>
+
+<!-- PREVIEW -->
+<div class="preview-grid">
+  <div>
+    <h3>Gambar Asli</h3>
+    <img id="preview-original" class="preview-img">
+  </div>
+
+  <div>
+    <h3>Hasil Anotasi</h3>
+    <img id="preview-annotated" class="preview-img">
+  </div>
+</div>
+
+{% endblock %}

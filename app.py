@@ -1,5 +1,4 @@
 import os
-import re
 import uuid
 from datetime import datetime
 
@@ -16,6 +15,18 @@ from flask import (
 )
 from ultralytics import YOLO
 
+# -------------------------------------------------
+# (Opsional) Tracking ID dengan Norfair
+# -------------------------------------------------
+try:
+    from norfair import Detection, Tracker
+    USE_TRACKING = True
+    print("[INFO] Norfair terdeteksi, tracking ID diaktifkan.")
+except ImportError:
+    USE_TRACKING = False
+    print("[WARN] Norfair tidak ditemukan. Jalankan: pip install norfair")
+    print("[WARN] Video akan dianalisis tanpa ID tracking.")
+
 
 # ============================================================
 # KONFIGURASI DASAR
@@ -28,22 +39,24 @@ WEB_OUTPUT_IMAGE = os.path.join(BASE_DIR, "analisa_gambar")
 WEB_OUTPUT_VIDEO = os.path.join(BASE_DIR, "analisa_video")
 MODEL_PATH = os.path.join(BASE_DIR, "models", "best.pt")
 
-# FOLDER STREAMING SESUAI PERMINTAAN ANDA
 STREAM_SNAPSHOT_DIR = os.path.join(BASE_DIR, "snapshot")
-STREAM_VIDEO_DIR    = os.path.join(BASE_DIR, "video_stream")
+STREAM_VIDEO_DIR = os.path.join(BASE_DIR, "video_stream")
 
-# DroidCam MJPEG URL
 RTSP_URL = "http://172.27.70.16:4747/video"
 
-# Buat folder jika belum ada
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(WEB_OUTPUT_IMAGE, exist_ok=True)
 os.makedirs(WEB_OUTPUT_VIDEO, exist_ok=True)
 os.makedirs(STREAM_SNAPSHOT_DIR, exist_ok=True)
 os.makedirs(STREAM_VIDEO_DIR, exist_ok=True)
 
-PX_PER_CM = 12.883
+# ================== PARAMETER KALIBRASI =====================
+PX_PER_CM = 12.7353  # ganti dengan nilai hasil kalibrasi terbaru
 
+# ================== PARAMETER FILTER DETEKSI =================
+CONF_THRESHOLD = 0.60      # minimal confidence box
+MIN_LENGTH_PX = 40.0       # minimal panjang garis head-tail (px)
+BORDER_MARGIN = 0.08       # margin tepi akuarium yang diabaikan (8% kiri/kanan/atas/bawah)
 
 
 # ============================================================
@@ -61,56 +74,124 @@ def run_id() -> str:
 
 
 # ============================================================
-# UTILITAS (TIDAK DIUBAH)
+# FUNGSI BANTU (FILTER + ANOTASI)
 # ============================================================
 
-def draw_annotations(img, box, head, tail, length_cm: float):
+def inside_valid_roi(box, img_shape):
+    """
+    Mengembalikan True jika pusat bounding box berada
+    di dalam area tengah (tidak terlalu dekat kaca).
+    """
+    h, w = img_shape[:2]
+    x1, y1, x2, y2 = box
+    cx = (x1 + x2) / 2.0
+    cy = (y1 + y2) / 2.0
+
+    left = w * BORDER_MARGIN
+    right = w * (1.0 - BORDER_MARGIN)
+    top = h * BORDER_MARGIN
+    bottom = h * (1.0 - BORDER_MARGIN)
+
+    return (left <= cx <= right) and (top <= cy <= bottom)
+
+
+def draw_annotations(img, box, head, tail, length_cm: float, fish_id=None):
     x1, y1, x2, y2 = map(int, box)
+
+    # kotak
     cv2.rectangle(img, (x1, y1), (x2, y2), (0, 255, 255), 2)
+
+    # keypoint
     cv2.circle(img, (int(head[0]), int(head[1])), 6, (0, 0, 255), -1)
     cv2.circle(img, (int(tail[0]), int(tail[1])), 6, (0, 255, 0), -1)
-    cv2.line(img, (int(head[0]), int(head[1])),
-             (int(tail[0]), int(tail[1])), (0, 255, 0), 3)
-    label = f"{length_cm:.2f} cm"
-    cv2.putText(img, label, (x1, y1 - 10),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+
+    # garis head-tail
+    cv2.line(
+        img,
+        (int(head[0]), int(head[1])),
+        (int(tail[0]), int(tail[1])),
+        (0, 255, 0),
+        3,
+    )
+
+    if fish_id is not None:
+        text = f"ID {fish_id} | {length_cm:.2f} cm"
+    else:
+        text = f"{length_cm:.2f} cm"
+
+    cv2.putText(
+        img,
+        text,
+        (x1, max(0, y1 - 10)),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.7,
+        (0, 255, 255),
+        2,
+    )
 
 
 # ============================================================
-# ANALISIS GAMBAR (TIDAK DIUBAH)
+# ANALISIS GAMBAR (STATIC IMAGE)
 # ============================================================
 
 def analyze_image(img_path):
     rid = run_id()
     img = cv2.imread(img_path)
+
+    if img is None:
+        raise RuntimeError(f"Gagal membaca gambar: {img_path}")
+
     res = model(img)[0]
 
     annotated = img.copy()
     records = []
 
-    if res.keypoints is not None:
+    if res.keypoints is not None and len(res.keypoints) > 0:
         kpts = res.keypoints.xy.cpu().numpy()
         boxes = res.boxes.xyxy.cpu().numpy()
         confs = res.boxes.conf.cpu().numpy()
 
+        fish_index = 1  # ID sederhana per gambar
+
         for i in range(len(kpts)):
+            conf = float(confs[i])
+            if conf < CONF_THRESHOLD:
+                continue
+
             head = kpts[i, 0]
             tail = kpts[i, 1]
 
             length_px = float(np.linalg.norm(head - tail))
+            if length_px < MIN_LENGTH_PX:
+                continue
+
+            box = boxes[i]
+
+            if not inside_valid_roi(box, img.shape):
+                continue
+
             length_cm = length_px / PX_PER_CM
 
-            draw_annotations(annotated, boxes[i], head, tail, length_cm)
+            draw_annotations(
+                annotated,
+                box,
+                head,
+                tail,
+                length_cm,
+                fish_id=fish_index,
+            )
 
             records.append(
                 {
                     "run_id": rid,
-                    "fish_id": i + 1,
-                    "confidence": float(confs[i]),
+                    "fish_id": fish_index,
+                    "confidence": conf,
                     "length_px": length_px,
                     "length_cm": length_cm,
                 }
             )
+
+            fish_index += 1
 
     idx = len(os.listdir(WEB_OUTPUT_IMAGE)) + 1
     img_name = f"IMG_ANALYSIS_{idx:04d}.png"
@@ -124,21 +205,76 @@ def analyze_image(img_path):
     summary = {
         "run_id": rid,
         "num_fish": len(records),
-        "max_length_cm": max([r["length_cm"] for r in records], default=0),
-        "min_length_cm": min([r["length_cm"] for r in records], default=0),
+        "max_length_cm": max([r["length_cm"] for r in records], default=0.0),
+        "min_length_cm": min([r["length_cm"] for r in records], default=0.0),
     }
 
     return img_name, csv_name, summary, records
 
 
 # ============================================================
-# ANALISIS VIDEO (TIDAK DIUBAH)
+# ANALISIS VIDEO (DENGAN TRACKING ID JIKA NORFAIR TERSEDIA)
 # ============================================================
+
+# ---- konfigurasi tracker Norfair ----
+def distance_fn(detection, tracked_object):
+    # Jarak rata-rata antara dua titik (head dan tail)
+    return np.linalg.norm(detection.points - tracked_object.estimate, axis=1).mean()
+
+
+if USE_TRACKING:
+    tracker = Tracker(
+        distance_function=distance_fn,
+        distance_threshold=30    # jarak antar titik head-tail antar frame
+    )
+else:
+    tracker = None
+
+
+
+def yolo_to_detections(res):
+    """Konversi output YOLO ke Detection Norfair."""
+    detections = []
+
+    if res.keypoints is None or len(res.keypoints) == 0:
+        return detections
+
+    kpts = res.keypoints.xy.cpu().numpy()
+    boxes = res.boxes.xyxy.cpu().numpy()
+    confs = res.boxes.conf.cpu().numpy()
+
+    for i in range(len(kpts)):
+        conf = float(confs[i])
+        if conf < CONF_THRESHOLD:
+            continue
+
+        head = kpts[i, 0]
+        tail = kpts[i, 1]
+
+        length_px = float(np.linalg.norm(head - tail))
+        if length_px < MIN_LENGTH_PX:
+            continue
+
+        box = boxes[i]
+
+        detections.append(
+            Detection(
+                points=np.array([head, tail]),
+                scores=np.array([conf, conf]),
+                data={"box": box},
+            )
+        )
+
+    return detections
+
 
 def analyze_video(video_path):
     rid = run_id()
 
     cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        raise RuntimeError(f"Gagal membuka video: {video_path}")
+
     fps = cap.get(cv2.CAP_PROP_FPS) or 15
     w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
@@ -164,26 +300,87 @@ def analyze_video(video_path):
         res = model(frame)[0]
         annotated = frame.copy()
 
-        if res.keypoints is not None:
-            kpts = res.keypoints.xy.cpu().numpy()
-            boxes = res.boxes.xyxy.cpu().numpy()
+        if USE_TRACKING:
+            detections = yolo_to_detections(res)
+            tracks = tracker.update(detections)
 
-            for i in range(len(kpts)):
-                head = kpts[i, 0]
-                tail = kpts[i, 1]
+            for track_obj in tracks:
+                if track_obj.estimate is None or len(track_obj.estimate) < 2:
+                    continue
+
+                head, tail = track_obj.estimate[0], track_obj.estimate[1]
+                box = track_obj.last_detection.data.get("box")
+
+                if not inside_valid_roi(box, frame.shape):
+                    continue
 
                 length_px = float(np.linalg.norm(head - tail))
                 length_cm = length_px / PX_PER_CM
+                fish_id = int(track_obj.id)
 
-                draw_annotations(annotated, boxes[i], head, tail, length_cm)
+                draw_annotations(
+                    annotated,
+                    box,
+                    head,
+                    tail,
+                    length_cm,
+                    fish_id=fish_id,
+                )
 
                 logs.append(
                     {
+                        "run_id": rid,
                         "frame": frame_idx,
-                        "fish_id": i + 1,
+                        "track_id": fish_id,
+                        "length_px": length_px,
                         "length_cm": length_cm,
                     }
                 )
+        else:
+            # fallback: tanpa tracking, seperti versi awal (ID = i+1 per frame)
+            if res.keypoints is not None and len(res.keypoints) > 0:
+                kpts = res.keypoints.xy.cpu().numpy()
+                boxes = res.boxes.xyxy.cpu().numpy()
+                confs = res.boxes.conf.cpu().numpy()
+
+                for i in range(len(kpts)):
+                    conf = float(confs[i])
+                    if conf < CONF_THRESHOLD:
+                        continue
+
+                    head = kpts[i, 0]
+                    tail = kpts[i, 1]
+
+                    length_px = float(np.linalg.norm(head - tail))
+                    if length_px < MIN_LENGTH_PX:
+                        continue
+
+                    box = boxes[i]
+
+                    if not inside_valid_roi(box, frame.shape):
+                        continue
+
+                    length_cm = length_px / PX_PER_CM
+                    fish_id = i + 1
+
+                    draw_annotations(
+                        annotated,
+                        box,
+                        head,
+                        tail,
+                        length_cm,
+                        fish_id=fish_id,
+                    )
+
+                    logs.append(
+                        {
+                            "run_id": rid,
+                            "frame": frame_idx,
+                            "track_id": fish_id,
+                            "length_px": length_px,
+                            "length_cm": length_cm,
+                        }
+                    )
 
         writer.write(annotated)
         frame_idx += 1
@@ -206,7 +403,7 @@ last_frame = None
 
 
 def yolo_stream_generator():
-    """Streaming realtime TANPA YOLO."""
+    """Streaming realtime TANPA YOLO (raw feed)."""
     global recording, stream_writer, last_frame
 
     cap = cv2.VideoCapture(RTSP_URL)
@@ -265,11 +462,7 @@ def stream_capture():
 
     cv2.imwrite(save_path, last_frame)
 
-    return jsonify({
-        "status": "ok",
-        "file": filename,
-        "path": save_path
-    })
+    return jsonify({"status": "ok", "file": filename, "path": save_path})
 
 
 @app.route("/stream/record-start", methods=["POST"])
@@ -314,20 +507,23 @@ def stream_record_stop():
 
 
 # ============================================================
-# ROUTE UNTUK FILE ANOTASI (WAJIB ADA)
+# ROUTE UNTUK FILE ANOTASI
 # ============================================================
 
 @app.route("/analisa_gambar/<path:filename>")
 def serve_analysis_image(filename):
     return send_file(os.path.join(WEB_OUTPUT_IMAGE, filename))
 
+
 @app.route("/analisa_gambar/csv/<path:filename>")
 def serve_analysis_image_csv(filename):
     return send_file(os.path.join(WEB_OUTPUT_IMAGE, filename))
 
+
 @app.route("/analisa_video/<path:filename>")
 def serve_analysis_video(filename):
     return send_file(os.path.join(WEB_OUTPUT_VIDEO, filename))
+
 
 @app.route("/analisa_video/csv/<path:filename>")
 def serve_analysis_video_csv(filename):

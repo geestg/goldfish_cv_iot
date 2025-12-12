@@ -1,7 +1,7 @@
 task: pose
 mode: train
 model: yolov8s-pose.pt
-data: /content/goldfish-2/data.yaml
+data: /content/goldfish-3/data.yaml
 epochs: 150
 time: null
 patience: 50
@@ -12,8 +12,8 @@ save_period: -1
 cache: false
 device: '0'
 workers: 8
-project: /content/drive/MyDrive/goldfish_train_results/train_pose_v2
-name: train
+project: /content/drive/MyDrive/goldfish_train_results
+name: train_pose_v3
 exist_ok: true
 pretrained: true
 optimizer: auto
@@ -103,4 +103,4 @@ auto_augment: randaugment
 erasing: 0.4
 cfg: null
 tracker: botsort.yaml
-save_dir: /content/drive/MyDrive/goldfish_train_results/train_pose_v2/train
+save_dir: /content/drive/MyDrive/goldfish_train_results/train_pose_v3

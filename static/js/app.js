@@ -20,6 +20,10 @@ const summaryBox = document.getElementById("summary-box");
 const fishTableBody = document.querySelector("#fish-table tbody");
 const csvLink = document.getElementById("csv-link");
 
+// tombol feed (image page)
+const btnFeed = document.getElementById("btn-feed");
+const feedStatus = document.getElementById("feed-status");
+
 if (imageForm) {
   imageForm.addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -33,27 +37,25 @@ if (imageForm) {
     setStatus(imageStatus, "Memproses gambar...", "info");
     btnImage.disabled = true;
 
-    const resp = await fetch("/api/analyze-image", {
-      method: "POST",
-      body: form,
-    });
-
+    const resp = await fetch("/api/analyze-image", { method: "POST", body: form });
     const data = await resp.json();
     btnImage.disabled = false;
 
     if (data.status !== "ok") {
-      setStatus(imageStatus, data.message, "error");
+      setStatus(imageStatus, data.message || "Gagal analisis.", "error");
       return;
     }
 
     previewAnnotated.src = data.image_url + "?v=" + Date.now();
     csvLink.href = data.csv_url;
 
+    const s = data.summary;
     summaryBox.innerHTML = `
-      <p><strong>Run ID:</strong> ${data.summary.run_id}</p>
-      <p><strong>Jumlah ikan:</strong> ${data.summary.num_fish}</p>
-      <p><strong>Panjang Maksimum:</strong> ${data.summary.max_length_cm.toFixed(2)} cm</p>
-      <p><strong>Panjang Minimum:</strong> ${data.summary.min_length_cm.toFixed(2)} cm</p>
+      <p><strong>Run ID:</strong> ${s.run_id}</p>
+      <p><strong>Jumlah ikan:</strong> ${s.num_fish}</p>
+      <p><strong>Rata-rata panjang:</strong> ${s.avg_length_cm.toFixed(2)} cm</p>
+      <p><strong>Status panen:</strong> ${s.harvest_status}</p>
+      <p><strong>Durasi pakan:</strong> ${s.feeding_duration_ms} ms</p>
     `;
     summaryBox.classList.remove("muted");
 
@@ -69,6 +71,40 @@ if (imageForm) {
     });
 
     setStatus(imageStatus, "Analisis selesai.", "info");
+
+    // aktifkan tombol feed setelah ada hasil
+    if (btnFeed) btnFeed.disabled = false;
+  });
+}
+
+/* ============================================================
+   FEED MANUAL (BERDASARKAN ANALISIS TERAKHIR)
+============================================================ */
+
+if (btnFeed) {
+  btnFeed.disabled = true; // default nonaktif, aktif setelah analisis
+
+  btnFeed.addEventListener("click", async () => {
+    if (feedStatus) {
+      feedStatus.textContent = "Mengirim perintah pakan...";
+      feedStatus.style.color = "#0f172a";
+    }
+
+    const resp = await fetch("/api/feed-now", { method: "POST" });
+    const data = await resp.json();
+
+    if (data.status !== "ok") {
+      if (feedStatus) {
+        feedStatus.textContent = data.message || "Gagal mengirim perintah pakan.";
+        feedStatus.style.color = "red";
+      }
+      return;
+    }
+
+    if (feedStatus) {
+      feedStatus.textContent = `Pakan dikirim (${data.feeding_duration_ms} ms).`;
+      feedStatus.style.color = "green";
+    }
   });
 }
 
@@ -85,7 +121,13 @@ const videoPreview = document.getElementById("video-preview");
 const videoCsv = document.getElementById("video-csv");
 const videoSummary = document.getElementById("video-summary");
 
+// tombol feed (video page)
+const btnFeedVideo = document.getElementById("btn-feed-video");
+const feedStatusVideo = document.getElementById("feed-status-video");
+
 if (videoForm) {
+  if (btnFeedVideo) btnFeedVideo.disabled = true;
+
   videoForm.addEventListener("submit", async (e) => {
     e.preventDefault();
 
@@ -95,16 +137,12 @@ if (videoForm) {
     setStatus(videoStatus, "Memproses video...", "info");
     btnVideo.disabled = true;
 
-    const resp = await fetch("/api/analyze-video", {
-      method: "POST",
-      body: form,
-    });
-
+    const resp = await fetch("/api/analyze-video", { method: "POST", body: form });
     const data = await resp.json();
     btnVideo.disabled = false;
 
     if (data.status !== "ok") {
-      setStatus(videoStatus, data.message, "error");
+      setStatus(videoStatus, data.message || "Gagal analisis video.", "error");
       return;
     }
 
@@ -114,18 +152,53 @@ if (videoForm) {
 
     videoCsv.href = data.csv_url;
 
+    const s = data.summary;
     videoSummary.innerHTML = `
-      <p><strong>Run ID:</strong> ${data.run_id}</p>
+      <p><strong>Run ID:</strong> ${s.run_id}</p>
+      <p><strong>Jumlah ikan:</strong> ${s.num_fish}</p>
+      <p><strong>Rata-rata panjang:</strong> ${s.avg_length_cm.toFixed(2)} cm</p>
+      <p><strong>Status panen:</strong> ${s.harvest_status}</p>
+      <p><strong>Durasi pakan:</strong> ${s.feeding_duration_ms} ms</p>
       <p><strong>Total log deteksi:</strong> ${data.total_logs}</p>
     `;
-    videoSummary.classList.remove("muted");
 
-    setStatus(videoStatus, "Analisis Video selesai.", "info");
+    setStatus(videoStatus, "Analisis video selesai.", "info");
+
+    if (btnFeedVideo) btnFeedVideo.disabled = false;
   });
 }
 
 /* ============================================================
-   STREAMING LARIX + YOLO (REALTIME)
+   FEED MANUAL (VIDEO PAGE)
+============================================================ */
+
+if (btnFeedVideo) {
+  btnFeedVideo.addEventListener("click", async () => {
+    if (feedStatusVideo) {
+      feedStatusVideo.textContent = "Mengirim perintah pakan...";
+      feedStatusVideo.style.color = "#0f172a";
+    }
+
+    const resp = await fetch("/api/feed-now", { method: "POST" });
+    const data = await resp.json();
+
+    if (data.status !== "ok") {
+      if (feedStatusVideo) {
+        feedStatusVideo.textContent = data.message || "Gagal mengirim perintah pakan.";
+        feedStatusVideo.style.color = "red";
+      }
+      return;
+    }
+
+    if (feedStatusVideo) {
+      feedStatusVideo.textContent = `Pakan dikirim (${data.feeding_duration_ms} ms).`;
+      feedStatusVideo.style.color = "green";
+    }
+  });
+}
+
+/* ============================================================
+   STREAMING
 ============================================================ */
 
 const streamImg = document.getElementById("stream-video");
@@ -135,48 +208,41 @@ const btnStreamRecStart = document.getElementById("btn-stream-rec-start");
 const btnStreamRecStop = document.getElementById("btn-stream-rec-stop");
 
 if (streamImg) {
-
-  // Capture snapshot
-  btnStreamCapture.addEventListener("click", async () => {
-    setStatus(streamStatus, "Menyimpan snapshot...", "info");
-
+  btnStreamCapture?.addEventListener("click", async () => {
+    if (streamStatus) streamStatus.textContent = "Menyimpan snapshot...";
     const resp = await fetch("/stream/capture", { method: "POST" });
     const data = await resp.json();
 
     if (data.status !== "ok") {
-      setStatus(streamStatus, data.message || "Gagal capture.", "error");
+      if (streamStatus) streamStatus.textContent = data.message || "Gagal capture.";
       return;
     }
 
-    setStatus(streamStatus, "Snapshot disimpan: " + data.file, "info");
+    if (streamStatus) streamStatus.textContent = "Snapshot disimpan: " + data.file;
   });
 
-  // Mulai rekam
-  btnStreamRecStart.addEventListener("click", async () => {
-    setStatus(streamStatus, "Mengaktifkan perekaman...", "info");
-
+  btnStreamRecStart?.addEventListener("click", async () => {
+    if (streamStatus) streamStatus.textContent = "Mengaktifkan perekaman...";
     const resp = await fetch("/stream/record-start", { method: "POST" });
     const data = await resp.json();
 
     if (data.status === "error") {
-      setStatus(streamStatus, data.message, "error");
+      if (streamStatus) streamStatus.textContent = data.message;
     } else if (data.status === "already_recording") {
-      setStatus(streamStatus, "Sedang merekam.", "info");
+      if (streamStatus) streamStatus.textContent = "Sedang merekam.";
     } else {
-      setStatus(streamStatus, "Rekaman dimulai: " + data.file, "info");
+      if (streamStatus) streamStatus.textContent = "Rekaman dimulai: " + data.file;
     }
   });
 
-  // Stop rekam
-  btnStreamRecStop.addEventListener("click", async () => {
+  btnStreamRecStop?.addEventListener("click", async () => {
     const resp = await fetch("/stream/record-stop", { method: "POST" });
     const data = await resp.json();
 
-    if (data.status === "ok") {
-      setStatus(streamStatus, "Rekaman dihentikan.", "info");
-    } else {
-      setStatus(streamStatus, "Tidak ada rekaman aktif.", "error");
+    if (streamStatus) {
+      streamStatus.textContent = (data.status === "ok")
+        ? "Rekaman dihentikan."
+        : "Tidak ada rekaman aktif.";
     }
   });
-
 }

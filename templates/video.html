@@ -3,24 +3,30 @@
 
 <div class="section-card">
   <h2>Analisis Video</h2>
-  <p>Unggah video ikan untuk mendapatkan anotasi dan log tiap frame.</p>
+  <p>Unggah video ikan untuk mendapatkan anotasi, log, jumlah ikan, panjang, estimasi panen, dan kontrol pakan.</p>
 
   <form id="video-form" style="margin-top:10px;">
-    <input type="file" id="video-input" name="video">
+    <input type="file" id="video-input" name="video" required>
     <button id="btn-video">Proses Video</button>
     <div id="video-status" class="status-box hidden"></div>
   </form>
+
+  <div style="margin-top:12px;">
+    <button id="btn-feed-video"
+            style="padding:10px 18px; border-radius:12px; background:#16a34a; color:white; border:none; cursor:pointer;">
+      🍽️ Berikan Pakan
+    </button>
+    <div id="feed-status-video" style="margin-top:8px; font-size:14px;"></div>
+  </div>
 </div>
 
-<!-- RINGKASAN VIDEO -->
 <div class="summary-grid">
   <div class="summary-box">
-    <p id="video-summary"><strong>Belum ada data.</strong></p>
+    <div id="video-summary"><strong>Belum ada data.</strong></div>
     <a id="video-csv" class="btn-download" href="#">Download CSV</a>
   </div>
 </div>
 
-<!-- PREVIEW VIDEO -->
 <div class="section-card">
   <h3>Video Anotasi</h3>
   <video id="video-preview" class="video-show" controls></video>

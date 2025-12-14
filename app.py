@@ -63,11 +63,8 @@ MQTT_TOPIC_FEED = "goldfish/feeder/cmd"
 MQTT_TOPIC_STATUS = "goldfish/feeder/status"
 
 # ================= LOGIKA SERVO MULTI-PUTARAN =================
-# durasi buka servo tiap putaran (ms) -> kalibrasikan sesuai jumlah pakan keluar
 BASE_MS_PER_TURN = 700
-# jeda antar putaran (ms) -> agar pakan turun dan servo tidak “ngegas”
 GAP_MS_BETWEEN_TURNS = 600
-# safety: batasi putaran maksimum supaya tidak overdosing
 MAX_TURNS = 12
 
 
@@ -94,24 +91,26 @@ def run_id() -> str:
 def fish_to_turns(n: int) -> int:
     """
     Pemetaan final jumlah ikan → putaran servo
-    1–2  ikan → 1x
-    3–4  ikan → 2x
-    5–6  ikan → 3x
-    7–8  ikan → 4x
-    >8   ikan → 4x (safety cap)
+    1–3  ikan → 1x putaran
+    4–5  ikan → 2x putaran
+    6–7  ikan → 3x putaran
+    8–9  ikan → 4x putaran
+    >9   ikan → 5x putaran (safety cap)
     """
     if n <= 0:
         return 0
-    elif n <= 2:
+    elif n <= 3:
         return 1
-    elif n <= 4:
+    elif n <= 5:
         return 2
-    elif n <= 6:
+    elif n <= 7:
         return 3
-    else:
+    elif n <= 9:
         return 4
-
-
+    else:
+        # Maksimal 5x putaran
+        return 5
+    
 def estimate_harvest(avg_length_cm: float) -> str:
     if avg_length_cm >= 25.0:
         return "Siap Panen"
@@ -124,10 +123,12 @@ def publish_feeding_command(summary: dict, source: str = "manual"):
     """Kirim perintah feed dengan pola multi-putaran."""
     try:
         num_fish = int(summary.get("num_fish", 0))
-        if num_fish <= 0:
+        turns = int(summary.get("feeding_turns", 0))
+        
+        if num_fish <= 0 or turns <= 0:
+            print("[MQTT] No fish detected or turns is 0, feed canceled")
             return
 
-        turns = int(summary.get("feeding_turns", 0))
         duration = int(summary.get("feeding_duration_ms", BASE_MS_PER_TURN))
         gap = int(summary.get("feeding_gap_ms", GAP_MS_BETWEEN_TURNS))
 
@@ -161,7 +162,7 @@ def publish_feeding_command(summary: dict, source: str = "manual"):
         print(f"[MQTT] Published to {MQTT_TOPIC_FEED}: {payload}")
 
     except Exception as e:
-        print(f"[MQTT] ERROR publish: {e}")
+        print(f"[MQTT] ERROR publish_feeding_command: {e}")
 
 
 # ============================================================
@@ -259,8 +260,7 @@ def analyze_image(img_path):
     avg_len = float(np.mean([r["length_cm"] for r in records])) if records else 0.0
 
     num_fish = len(records)
-    turns = fish_to_turns(num_fish)
-
+    turns = fish_to_turns(num_fish) # Hitung turns otomatis
 
     summary = {
         "run_id": rid,
@@ -436,8 +436,7 @@ def analyze_video(video_path):
     else:
         unique_ids, avg_len, max_len, min_len = 0, 0.0, 0.0, 0.0
 
-    turns = fish_to_turns(int(unique_ids))
-
+    turns = fish_to_turns(int(unique_ids)) # Hitung turns otomatis
 
     video_summary = {
         "run_id": rid,
@@ -619,24 +618,38 @@ def api_video():
 
 
 # ============================================================
-# API FEED MANUAL (TOMBOL BERIKAN PAKAN)
+# API FEED MANUAL (Otomatis berdasarkan LAST_SUMMARY)
 # ============================================================
 
-@app.route("/api/feed-now", methods=["POST"])
-def api_feed_now():
+@app.route("/api/feed-manual", methods=["POST"])
+def api_feed_manual():
     global LAST_SUMMARY
 
     if LAST_SUMMARY is None:
-        return jsonify({"status": "error", "message": "Belum ada hasil analisis."}), 400
+        return jsonify({
+            "status": "error",
+            "message": "Belum ada hasil analisis. Harap proses gambar/video terlebih dahulu."
+        }), 400
 
-    publish_feeding_command(LAST_SUMMARY, source="manual")
+    turns = LAST_SUMMARY.get("feeding_turns", 0) 
+    
+    if turns <= 0:
+        return jsonify({
+            "status": "error",
+            "message": f"Tidak ada ikan terdeteksi atau pakan tidak diperlukan ({LAST_SUMMARY.get('num_fish', 0)} ikan)."
+        }), 400
+
+    summary_payload = dict(LAST_SUMMARY)
+    summary_payload["feeding_turns"] = turns 
+
+    publish_feeding_command(summary_payload, source="automatic-ui")
 
     return jsonify({
         "status": "ok",
-        "message": "Perintah pakan dikirim.",
-        "turns": LAST_SUMMARY.get("feeding_turns", 0),
-        "duration_ms": LAST_SUMMARY.get("feeding_duration_ms", BASE_MS_PER_TURN),
-        "gap_ms": LAST_SUMMARY.get("feeding_gap_ms", GAP_MS_BETWEEN_TURNS)
+        "message": "Perintah pakan dikirim (Otomatis)",
+        "turns": turns,
+        "duration_ms": summary_payload.get("feeding_duration_ms"),
+        "gap_ms": summary_payload.get("feeding_gap_ms")
     })
 
 

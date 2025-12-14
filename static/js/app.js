@@ -55,6 +55,7 @@ if (imageForm) {
       <p><strong>Jumlah ikan:</strong> ${s.num_fish}</p>
       <p><strong>Rata-rata panjang:</strong> ${s.avg_length_cm.toFixed(2)} cm</p>
       <p><strong>Status panen:</strong> ${s.harvest_status}</p>
+      <p><strong>Putaran Pakan Otomatis:</strong> ${s.feeding_turns}x</p>
       <p><strong>Durasi pakan:</strong> ${s.feeding_duration_ms} ms</p>
     `;
     summaryBox.classList.remove("muted");
@@ -78,35 +79,37 @@ if (imageForm) {
 }
 
 /* ============================================================
-   FEED MANUAL (BERDASARKAN ANALISIS TERAKHIR)
+   FEED OTOMATIS - IMAGE PAGE
 ============================================================ */
 
 if (btnFeed) {
-  btnFeed.disabled = true; // default nonaktif, aktif setelah analisis
+  btnFeed.disabled = true;
 
   btnFeed.addEventListener("click", async () => {
-    if (feedStatus) {
-      feedStatus.textContent = "Mengirim perintah pakan...";
-      feedStatus.style.color = "#0f172a";
-    }
+    // Kirim payload kosong. Backend akan menggunakan LAST_SUMMARY.feeding_turns
+    feedStatus.textContent = "Mengirim perintah pakan otomatis...";
+    feedStatus.style.color = "#0f172a";
 
-    const resp = await fetch("/api/feed-now", { method: "POST" });
+    const resp = await fetch("/api/feed-manual", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({})
+    });
+
     const data = await resp.json();
 
     if (data.status !== "ok") {
-      if (feedStatus) {
-        feedStatus.textContent = data.message || "Gagal mengirim perintah pakan.";
-        feedStatus.style.color = "red";
-      }
+      feedStatus.textContent = data.message || "Gagal mengirim pakan.";
+      feedStatus.style.color = "red";
       return;
     }
 
-    if (feedStatus) {
-      feedStatus.textContent = `Pakan dikirim (${data.feeding_duration_ms} ms).`;
-      feedStatus.style.color = "green";
-    }
+    feedStatus.textContent = `Pakan otomatis dikirim (${data.turns}x putaran servo)`;
+    feedStatus.style.color = "green";
   });
 }
+
+
 
 /* ============================================================
    ANALISIS VIDEO
@@ -158,6 +161,7 @@ if (videoForm) {
       <p><strong>Jumlah ikan:</strong> ${s.num_fish}</p>
       <p><strong>Rata-rata panjang:</strong> ${s.avg_length_cm.toFixed(2)} cm</p>
       <p><strong>Status panen:</strong> ${s.harvest_status}</p>
+      <p><strong>Putaran Pakan Otomatis:</strong> ${s.feeding_turns}x</p>
       <p><strong>Durasi pakan:</strong> ${s.feeding_duration_ms} ms</p>
       <p><strong>Total log deteksi:</strong> ${data.total_logs}</p>
     `;
@@ -169,31 +173,32 @@ if (videoForm) {
 }
 
 /* ============================================================
-   FEED MANUAL (VIDEO PAGE)
+   FEED OTOMATIS - VIDEO PAGE
 ============================================================ */
 
 if (btnFeedVideo) {
   btnFeedVideo.addEventListener("click", async () => {
-    if (feedStatusVideo) {
-      feedStatusVideo.textContent = "Mengirim perintah pakan...";
-      feedStatusVideo.style.color = "#0f172a";
-    }
+    // Kirim payload kosong. Backend akan menggunakan LAST_SUMMARY.feeding_turns
 
-    const resp = await fetch("/api/feed-now", { method: "POST" });
+    feedStatusVideo.textContent = "Mengirim perintah pakan otomatis...";
+    feedStatusVideo.style.color = "#0f172a";
+
+    const resp = await fetch("/api/feed-manual", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({})
+    });
+
     const data = await resp.json();
 
     if (data.status !== "ok") {
-      if (feedStatusVideo) {
-        feedStatusVideo.textContent = data.message || "Gagal mengirim perintah pakan.";
-        feedStatusVideo.style.color = "red";
-      }
+      feedStatusVideo.textContent = data.message || "Gagal mengirim pakan.";
+      feedStatusVideo.style.color = "red";
       return;
     }
 
-    if (feedStatusVideo) {
-      feedStatusVideo.textContent = `Pakan dikirim (${data.feeding_duration_ms} ms).`;
-      feedStatusVideo.style.color = "green";
-    }
+    feedStatusVideo.textContent = `Pakan otomatis dikirim (${data.turns}x putaran servo)`;
+    feedStatusVideo.style.color = "green";
   });
 }
 

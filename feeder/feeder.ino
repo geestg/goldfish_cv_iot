@@ -3,102 +3,175 @@
 #include <ArduinoJson.h>
 #include <ESP32Servo.h>
 
-/* ================= WIFI ================= */
-const char* WIFI_SSID = "Efeeder";
-const char* WIFI_PASS = "11111111";
+/* ================= KONFIGURASI ANDA ================= */
+const char* WIFI_SSID = "NAMA_WIFI_ANDA"; // <--- GANTI!
+const char* WIFI_PASS = "PASSWORD_WIFI_ANDA"; // <--- GANTI!
 
-/* ================= MQTT ================= */
 const char* MQTT_BROKER = "172.27.27.133";
 const int   MQTT_PORT   = 1883;
-const char* TOPIC_CMD  = "goldfish/feeder/cmd";
+const char* TOPIC_CMD   = "goldfish/feeder/cmd";
 
-/* ================= SERVO ================= */
-#define SERVO_PIN 18
-#define SERVO_CLOSE_US 500
-#define SERVO_OPEN_US  2400
+/* ================= PIN SERVO ================= */
+#define SERVO_PIN 12             // <--- PIN DATA SERVO
+#define SERVO_OPEN_US  2000      // Nilai Mikrosekon untuk posisi BUKA
+#define SERVO_CLOSE_US 1000     // Nilai Mikrosekon untuk posisi TUTUP
 
 Servo feeder;
 
-/* ================= MQTT ================= */
+/* ================= MQTT CLIENT ================= */
 WiFiClient espClient;
 PubSubClient client(espClient);
 
-/* ================= FEED STATE ================= */
-bool feedingActive = false;
+/* ================= FEED STATE MACHINE ================= */
+bool feeding = false;
 int totalTurns = 0;
 int currentTurn = 0;
 
-int openTimeMs = 700;
-int gapTimeMs  = 600;
+unsigned long openMs = 700;
+unsigned long gapMs  = 600;
+unsigned long timer  = 0;
 
-unsigned long stateTimer = 0;
-
-/* ================= FSM ================= */
 enum FeedState {
   IDLE,
-  OPEN,
-  WAIT_OPEN,
-  WAIT_GAP
+  SERVO_OPEN,
+  SERVO_HOLD,
+  SERVO_GAP
 };
 
-FeedState feedState = IDLE;
-
-/* ================= SERVO ================= */
-void servoOpen()  { feeder.writeMicroseconds(SERVO_OPEN_US); }
-void servoClose() { feeder.writeMicroseconds(SERVO_CLOSE_US); }
+FeedState state = IDLE;
 
 /* ================= MQTT CALLBACK ================= */
 void callback(char* topic, byte* payload, unsigned int length) {
-  StaticJsonDocument<256> doc;
-  if (deserializeJson(doc, payload, length)) return;
+  Serial.println("[MQTT] Command received");
 
-  if (strcmp(doc["action"] | "", "feed") != 0) return;
-  if (feedingActive) return;
+  char buffer[256];
+  if (length >= sizeof(buffer)) length = sizeof(buffer) - 1; 
+  memcpy(buffer, payload, length);
+  buffer[length] = '\0';
+  
+  StaticJsonDocument<256> doc;
+  DeserializationError error = deserializeJson(doc, buffer);
+  
+  if (error) {
+    Serial.print("[MQTT] JSON ERROR: ");
+    Serial.println(error.f_str());
+    return;
+  }
+
+  // Debugging: Cetak isi JSON yang diterima
+  Serial.print("[MQTT] Payload: ");
+  serializeJson(doc, Serial);
+  Serial.println();
+
+  if (strcmp(doc["action"], "feed") != 0) {
+    Serial.println("[MQTT] Action not 'feed', ignored.");
+    return;
+  }
+
+  if (feeding) {
+    Serial.println("[FEED] Still feeding, command ignored.");
+    return;
+  }
 
   totalTurns = doc["turns"] | 1;
-  openTimeMs = doc["duration"] | 700;
-  gapTimeMs  = doc["gap"] | 600;
+  openMs     = doc["duration"] | 700;
+  gapMs      = doc["gap"] | 600;
 
+  // Set state machine untuk memulai
   currentTurn = 0;
-  feedingActive = true;
-  feedState = OPEN;
+  feeding     = true;
+  state       = SERVO_OPEN;
 
-  Serial.printf("FEED START | turns=%d\n", totalTurns);
+  Serial.printf("[FEED] START | turns=%d, openMs=%lu, gapMs=%lu\n", totalTurns, openMs, gapMs);
 }
 
-/* ================= FSM PROCESS ================= */
-void processFeeding() {
-  if (!feedingActive) return;
+/* ================= SETUP ================= */
+void setup() {
+  Serial.begin(115200);
+
+  // --- WIFI ---
+  WiFi.begin(WIFI_SSID, WIFI_PASS);
+  Serial.print("[WIFI] Connecting");
+  int attempts = 0;
+  while (WiFi.status() != WL_CONNECTED && attempts < 20) {
+    delay(300);
+    Serial.print(".");
+    attempts++;
+  }
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("\n[WIFI] Connected");
+    Serial.print("IP Address: ");
+    Serial.println(WiFi.localIP());
+  } else {
+    Serial.println("\n[WIFI] Failed to connect. Check SSID/PASS.");
+  }
+
+
+  // --- MQTT ---
+  client.setServer(MQTT_BROKER, MQTT_PORT);
+  client.setCallback(callback);
+
+  // --- SERVO ---
+  feeder.setPeriodHertz(50);
+  // Rentang 500-2500 adalah rentang standar untuk mikrosekon
+  feeder.attach(SERVO_PIN, 500, 2500); 
+  feeder.writeMicroseconds(SERVO_CLOSE_US); // Posisi awal tertutup
+}
+
+void reconnect() {
+  while (!client.connected()) {
+    Serial.print("[MQTT] Attempting connection...");
+    if (client.connect("ESP32_FEEDER")) {
+      client.subscribe(TOPIC_CMD);
+      Serial.println("connected & subscribed");
+    } else {
+      Serial.print("failed, rc=");
+      Serial.print(client.state());
+      Serial.println(" retrying in 5 seconds");
+      delay(5000);
+    }
+  }
+}
+
+/* ================= LOOP ================= */
+void loop() {
+  if (!client.connected()) {
+    reconnect();
+  }
+  client.loop();
+
+  // Logika Feeding Servo
+  if (!feeding) return;
 
   unsigned long now = millis();
 
-  switch (feedState) {
-
-    case OPEN:
-      servoOpen();
-      stateTimer = now;
-      feedState = WAIT_OPEN;
+  switch (state) {
+    case SERVO_OPEN:
+      Serial.printf("[FEED] Turn %d/%d: Set Servo OPEN (%d us)\n", currentTurn + 1, totalTurns, SERVO_OPEN_US);
+      feeder.writeMicroseconds(SERVO_OPEN_US);
+      timer = now;
+      state = SERVO_HOLD;
       break;
 
-    case WAIT_OPEN:
-      if (now - stateTimer >= (unsigned long)openTimeMs) {
-        servoClose();
-        stateTimer = now;
-        feedState = WAIT_GAP;
+    case SERVO_HOLD:
+      if (now - timer >= openMs) {
+        Serial.printf("[FEED] Turn %d/%d: Set Servo CLOSE (%d us)\n", currentTurn + 1, totalTurns, SERVO_CLOSE_US);
+        feeder.writeMicroseconds(SERVO_CLOSE_US);
+        timer = now;
+        state = SERVO_GAP;
       }
       break;
 
-    case WAIT_GAP:
-      if (now - stateTimer >= (unsigned long)gapTimeMs) {
+    case SERVO_GAP:
+      if (now - timer >= gapMs) {
         currentTurn++;
-        Serial.printf("TURN %d / %d\n", currentTurn, totalTurns);
-
         if (currentTurn >= totalTurns) {
-          feedingActive = false;
-          feedState = IDLE;
-          Serial.println("FEED DONE");
+          feeding = false;
+          state   = IDLE;
+          Serial.println("[FEED] DONE. System IDLE.");
         } else {
-          feedState = OPEN;
+          Serial.println("[FEED] Gap done, starting next turn.");
+          state = SERVO_OPEN;
         }
       }
       break;
@@ -107,41 +180,4 @@ void processFeeding() {
     default:
       break;
   }
-}
-
-/* ================= MQTT CONNECT ================= */
-void connectMQTT() {
-  while (!client.connected()) {
-    if (client.connect("ESP32_FEEDER")) {
-      client.subscribe(TOPIC_CMD);
-      Serial.println("MQTT Connected");
-    } else {
-      delay(1000);
-    }
-  }
-}
-
-/* ================= SETUP ================= */
-void setup() {
-  Serial.begin(115200);
-
-  WiFi.begin(WIFI_SSID, WIFI_PASS);
-  while (WiFi.status() != WL_CONNECTED) delay(300);
-  Serial.println("WiFi connected");
-
-  client.setServer(MQTT_BROKER, MQTT_PORT);
-  client.setCallback(callback);
-
-  feeder.setPeriodHertz(50);
-  feeder.attach(SERVO_PIN, 500, 2500);
-  servoClose();
-
-  Serial.println("ESP32 FEEDER READY");
-}
-
-/* ================= LOOP ================= */
-void loop() {
-  if (!client.connected()) connectMQTT();
-  client.loop();
-  processFeeding();
 }

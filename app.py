@@ -146,11 +146,14 @@ def publish_feeding_command(summary: dict, source: str = "manual"):
         }
 
         publish.single(
-            MQTT_TOPIC_FEED,
-            json.dumps(payload),
-            hostname=MQTT_BROKER,
-            port=MQTT_PORT,
-        )
+    MQTT_TOPIC_FEED,
+    json.dumps(payload),
+    hostname=MQTT_BROKER,
+    port=MQTT_PORT,
+    qos=1,
+    retain=True
+)
+
 
         publish.single(
             MQTT_TOPIC_STATUS,
@@ -292,7 +295,7 @@ else:
     tracker = None
 
 
-def yolo_to_detections(res):
+def yolo_to_detections(res, frame_shape):
     detections = []
     if res.keypoints is None or len(res.keypoints) == 0:
         return detections
@@ -314,6 +317,11 @@ def yolo_to_detections(res):
             continue
 
         box = boxes[i]
+
+        # 🔒 FILTER ROI (KRUSIAL)
+        if not inside_valid_roi(box, frame_shape):
+            continue
+
         detections.append(
             Detection(
                 points=np.array([head, tail]),
@@ -322,6 +330,7 @@ def yolo_to_detections(res):
             )
         )
     return detections
+
 
 
 def analyze_video(video_path):
@@ -344,10 +353,24 @@ def analyze_video(video_path):
     csv_path = os.path.join(WEB_OUTPUT_VIDEO, out_csv)
 
     fourcc = cv2.VideoWriter_fourcc(*"avc1")
+
+
+
     writer = cv2.VideoWriter(out_vpath, fourcc, fps, (w, h))
 
     logs = []
     frame_idx = 0
+
+    # 🔁 TRACKER DIRESET PER VIDEO (WAJIB)
+    local_tracker = None
+    if USE_TRACKING:
+        local_tracker = Tracker(
+            distance_function=distance_fn,
+            distance_threshold=30
+        )
+
+    # 🎯 UNTUK HITUNG IKAN SEBENARNYA
+    max_simultaneous = 0
 
     while True:
         ok, frame = cap.read()
@@ -357,25 +380,36 @@ def analyze_video(video_path):
         res = model(frame)[0]
         annotated = frame.copy()
 
+        active_ids = set()
+
         if USE_TRACKING:
-            detections = yolo_to_detections(res)
-            tracks = tracker.update(detections)
+            detections = yolo_to_detections(res, frame.shape)
+
+            tracks = local_tracker.update(detections)
 
             for track_obj in tracks:
                 if track_obj.estimate is None or len(track_obj.estimate) < 2:
                     continue
 
-                head, tail = track_obj.estimate[0], track_obj.estimate[1]
-                box = track_obj.last_detection.data.get("box")
-
-                if box is None or not inside_valid_roi(box, frame.shape):
+                box = track_obj.last_detection.data.get("box") if track_obj.last_detection else None
+                if box is None:
                     continue
 
+                fish_id = int(track_obj.id)
+                active_ids.add(fish_id)
+
+                head, tail = track_obj.estimate[0], track_obj.estimate[1]
                 length_px = float(np.linalg.norm(head - tail))
                 length_cm = length_px / PX_PER_CM
-                fish_id = int(track_obj.id)
 
-                draw_annotations(annotated, box, head, tail, length_cm, fish_id=fish_id)
+                draw_annotations(
+                    annotated,
+                    box,
+                    head,
+                    tail,
+                    length_cm,
+                    fish_id=fish_id
+                )
 
                 logs.append({
                     "run_id": rid,
@@ -385,6 +419,7 @@ def analyze_video(video_path):
                     "length_cm": length_cm,
                 })
         else:
+            # fallback tanpa tracking
             if res.keypoints is not None and len(res.keypoints) > 0:
                 kpts = res.keypoints.xy.cpu().numpy()
                 boxes = res.boxes.xyxy.cpu().numpy()
@@ -397,7 +432,6 @@ def analyze_video(video_path):
 
                     head = kpts[i, 0]
                     tail = kpts[i, 1]
-
                     length_px = float(np.linalg.norm(head - tail))
                     if length_px < MIN_LENGTH_PX:
                         continue
@@ -406,10 +440,18 @@ def analyze_video(video_path):
                     if not inside_valid_roi(box, frame.shape):
                         continue
 
-                    length_cm = length_px / PX_PER_CM
                     fish_id = i + 1
+                    active_ids.add(fish_id)
 
-                    draw_annotations(annotated, box, head, tail, length_cm, fish_id=fish_id)
+                    length_cm = length_px / PX_PER_CM
+                    draw_annotations(
+                        annotated,
+                        box,
+                        head,
+                        tail,
+                        length_cm,
+                        fish_id=fish_id
+                    )
 
                     logs.append({
                         "run_id": rid,
@@ -419,6 +461,9 @@ def analyze_video(video_path):
                         "length_cm": length_cm,
                     })
 
+        # 🔢 HITUNG IKAN REAL (FRAME-BASED)
+        max_simultaneous = max(max_simultaneous, len(active_ids))
+
         writer.write(annotated)
         frame_idx += 1
 
@@ -427,20 +472,22 @@ def analyze_video(video_path):
 
     pd.DataFrame(logs).to_csv(csv_path, index=False)
 
+    # 📊 STATISTIK PANJANG IKAN
     if logs:
         df = pd.DataFrame(logs)
-        unique_ids = df["track_id"].nunique() if "track_id" in df.columns else 0
-        avg_len = float(df["length_cm"].mean()) if "length_cm" in df.columns else 0.0
-        max_len = float(df["length_cm"].max()) if "length_cm" in df.columns else 0.0
-        min_len = float(df["length_cm"].min()) if "length_cm" in df.columns else 0.0
+        avg_len = float(df["length_cm"].mean())
+        max_len = float(df["length_cm"].max())
+        min_len = float(df["length_cm"].min())
     else:
-        unique_ids, avg_len, max_len, min_len = 0, 0.0, 0.0, 0.0
+        avg_len = max_len = min_len = 0.0
 
-    turns = fish_to_turns(int(unique_ids)) # Hitung turns otomatis
+    # ✅ JUMLAH IKAN FINAL (BENAR)
+    num_fish = int(max_simultaneous)
+    turns = fish_to_turns(num_fish)
 
     video_summary = {
         "run_id": rid,
-        "num_fish": int(unique_ids),
+        "num_fish": num_fish,
         "max_length_cm": max_len,
         "min_length_cm": min_len,
         "avg_length_cm": avg_len,
@@ -451,8 +498,8 @@ def analyze_video(video_path):
     }
 
     LAST_SUMMARY = video_summary
-    return out_video, out_csv, rid, len(logs), logs, video_summary
 
+    return out_video, out_csv, rid, len(logs), logs, video_summary
 
 # ============================================================
 # STREAMING (RAW)

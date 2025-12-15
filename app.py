@@ -40,7 +40,7 @@ MODEL_PATH = os.path.join(BASE_DIR, "models", "best.pt")
 STREAM_SNAPSHOT_DIR = os.path.join(BASE_DIR, "snapshot")
 STREAM_VIDEO_DIR = os.path.join(BASE_DIR, "video_stream")
 
-RTSP_URL = "http://172.27.70.16:4747/video"  # sesuaikan
+RTSP_URL = "http://172.27.27.136:4747/video"  # sesuaikan
 
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(WEB_OUTPUT_IMAGE, exist_ok=True)
@@ -335,6 +335,8 @@ def yolo_to_detections(res, frame_shape):
 
 def analyze_video(video_path):
     global LAST_SUMMARY
+    num_fish = 0
+
 
     rid = run_id()
     cap = cv2.VideoCapture(video_path)
@@ -372,6 +374,14 @@ def analyze_video(video_path):
     # 🎯 UNTUK HITUNG IKAN SEBENARNYA
     max_simultaneous = 0
 
+    # 🧮 SIMPAN JUMLAH IKAN PER FRAME
+    fish_count_per_frame = []
+
+     # 🔢 HITUNG DURASI KEMUNCULAN TIAP ID
+    from collections import defaultdict
+    id_frame_count = defaultdict(int)
+
+
     while True:
         ok, frame = cap.read()
         if not ok:
@@ -397,6 +407,8 @@ def analyze_video(video_path):
 
                 fish_id = int(track_obj.id)
                 active_ids.add(fish_id)
+                id_frame_count[fish_id] += 1
+
 
                 head, tail = track_obj.estimate[0], track_obj.estimate[1]
                 length_px = float(np.linalg.norm(head - tail))
@@ -463,6 +475,7 @@ def analyze_video(video_path):
 
         # 🔢 HITUNG IKAN REAL (FRAME-BASED)
         max_simultaneous = max(max_simultaneous, len(active_ids))
+        fish_count_per_frame.append(len(active_ids))
 
         writer.write(annotated)
         frame_idx += 1
@@ -481,9 +494,20 @@ def analyze_video(video_path):
     else:
         avg_len = max_len = min_len = 0.0
 
-    # ✅ JUMLAH IKAN FINAL (BENAR)
-    num_fish = int(max_simultaneous)
+
+    # ============================================================
+    # ✅ JUMLAH IKAN FINAL (MAJORITY PER FRAME – BENAR)
+    # ============================================================
+    from statistics import mode
+
+    if fish_count_per_frame:
+        num_fish = int(mode(fish_count_per_frame))
+    else:
+        num_fish = 0
+
     turns = fish_to_turns(num_fish)
+
+
 
     video_summary = {
         "run_id": rid,

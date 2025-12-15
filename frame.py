@@ -2,10 +2,10 @@ import cv2
 import os
 
 # Path video tunggal
-video_path = r"D:\goldfish_cv_iot\videos\uji\mas1.mp4"
+video_path = r"D:\goldfish_cv_iot\videos\mas13.mp4"
 
 # Folder output
-output_folder = r"D:\goldfish_cv_iot\frame"
+output_folder = r"D:\goldfish_cv_iot\update_dataset"
 os.makedirs(output_folder, exist_ok=True)
 
 frame_interval = 10

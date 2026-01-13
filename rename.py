@@ -1,7 +1,7 @@
 import os
 
 # Path folder gambar
-folder_path = r"D:\goldfish_cv_iot\update_dataset"
+folder_path = r"D:\goldfish_cv_iot\video_stream\frame"
 
 # Ambil semua file gambar
 files = os.listdir(folder_path)

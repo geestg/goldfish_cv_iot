@@ -40,7 +40,7 @@ MODEL_PATH = os.path.join(BASE_DIR, "models", "best.pt")
 STREAM_SNAPSHOT_DIR = os.path.join(BASE_DIR, "snapshot")
 STREAM_VIDEO_DIR = os.path.join(BASE_DIR, "video_stream")
 
-RTSP_URL = "http://172.27.27.136:4747/video"  # sesuaikan
+RTSP_URL = "http://10.38.193.136:4747/video"  # sesuaikan
 
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(WEB_OUTPUT_IMAGE, exist_ok=True)
@@ -49,7 +49,7 @@ os.makedirs(STREAM_SNAPSHOT_DIR, exist_ok=True)
 os.makedirs(STREAM_VIDEO_DIR, exist_ok=True)
 
 # ================== PARAMETER KALIBRASI =====================
-PX_PER_CM = 12.7353  # ganti sesuai kalibrasi Anda
+PX_PER_CM = 14.6924
 
 # ================== PARAMETER FILTER DETEKSI =================
 CONF_THRESHOLD = 0.60
@@ -533,6 +533,26 @@ recording = False
 stream_writer = None
 last_frame = None
 
+# ===================== ROTASI STREAM =====================
+# Paksa orientasi stream agar portrait.
+# Opsi:
+# - "cw"   : 90 derajat searah jarum jam
+# - "ccw"  : 90 derajat berlawanan jarum jam
+# - "180"  : putar 180 derajat
+# - None   : tidak ada rotasi
+STREAM_ROTATE = "cw"
+
+def apply_rotation(frame):
+    if STREAM_ROTATE is None:
+        return frame
+    if STREAM_ROTATE == "cw":
+        return cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
+    if STREAM_ROTATE == "ccw":
+        return cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
+    if STREAM_ROTATE == "180":
+        return cv2.rotate(frame, cv2.ROTATE_180)
+    return frame
+
 
 def yolo_stream_generator():
     global recording, stream_writer, last_frame
@@ -551,6 +571,9 @@ def yolo_stream_generator():
         if not ok:
             continue
 
+        # ✅ Paksa portrait: rotasi frame sebelum dipakai untuk stream/capture/rekam
+        frame = apply_rotation(frame)
+
         last_frame = frame.copy()
 
         if recording and stream_writer is not None:
@@ -559,6 +582,7 @@ def yolo_stream_generator():
         _, buffer = cv2.imencode(".jpg", frame)
         yield (b"--frame\r\n"
                b"Content-Type: image/jpeg\r\n\r\n" + buffer.tobytes() + b"\r\n")
+
 
 
 @app.route("/stream/live")

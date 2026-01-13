@@ -8,8 +8,20 @@ from ultralytics import YOLO
 # ===============================
 MODEL_PATH = "models/best.pt"
 DATASET_DIR = "kalibrasi_images"   # folder berisi beberapa foto kalibrasi
-FISH_REAL_LENGTH_CM = 8.0          # panjang ikan asli dalam cm
 CONF_THRESHOLD = 0.70              # confidence minimal agar ikan dianggap valid
+
+# ===============================
+# INPUT PANJANG ASLI
+# ===============================
+raw = input("Masukkan panjang ikan asli (cm), contoh 7 atau 7.0: ").strip()
+raw = raw.replace(",", ".")  # antisipasi format desimal Indonesia
+
+try:
+    FISH_REAL_LENGTH_CM = float(raw)
+    if FISH_REAL_LENGTH_CM <= 0:
+        raise ValueError
+except ValueError:
+    raise SystemExit("Input panjang ikan tidak valid. Harus angka > 0.")
 
 # ===============================
 # LOAD MODEL
@@ -36,22 +48,26 @@ print("\n======================================")
 print("   MULTI-FISH CALIBRATION START")
 print("======================================\n")
 
-# List semua gambar kalibrasi
-files = [f for f in os.listdir(DATASET_DIR) if f.lower().endswith((".jpg", ".png", ".jpeg"))]
+if not os.path.isdir(DATASET_DIR):
+    raise SystemExit(f"Folder tidak ditemukan: {DATASET_DIR}")
 
+files = [f for f in os.listdir(DATASET_DIR) if f.lower().endswith((".jpg", ".png", ".jpeg"))]
 if len(files) == 0:
-    print("Tidak ada gambar di folder kalibrasi_images!")
-    exit()
+    raise SystemExit("Tidak ada gambar di folder kalibrasi_images!")
 
 for fname in files:
     path = os.path.join(DATASET_DIR, fname)
     img = cv2.imread(path)
 
+    if img is None:
+        print(f"[WARN] Gagal membaca gambar: {fname}. Skip.\n")
+        continue
+
     print(f"[INFO] Memproses: {fname}")
 
     results = model(img)[0]
 
-    if results.keypoints is None:
+    if results.keypoints is None or results.boxes is None:
         print("  → Tidak ada ikan terdeteksi. Skip.\n")
         continue
 
@@ -60,7 +76,7 @@ for fname in files:
 
     for i in range(len(kpts)):
         if confs[i] < CONF_THRESHOLD:
-            continue  # skip ikan yang tidak jelas
+            continue
 
         length_px = measure_length_px(kpts[i])
         all_lengths_px.append(length_px)
@@ -72,10 +88,9 @@ print("           HASIL KALIBRASI")
 print("======================================\n")
 
 if len(all_lengths_px) == 0:
-    print("Tidak cukup ikan yang valid untuk kalibrasi.")
-    exit()
+    raise SystemExit("Tidak cukup ikan yang valid untuk kalibrasi.")
 
-mean_px = np.mean(all_lengths_px)
+mean_px = float(np.mean(all_lengths_px))
 px_per_cm = mean_px / FISH_REAL_LENGTH_CM
 
 print(f"Total ikan valid: {len(all_lengths_px)}")

@@ -57,7 +57,7 @@ MIN_LENGTH_PX = 25.0
 BORDER_MARGIN = 0.03
 
 # ================= MQTT CONFIG =================
-MQTT_BROKER = "10.189.223.133"
+MQTT_BROKER = "10.106.138.133"
 MQTT_PORT = 1883
 MQTT_TOPIC_FEED = "goldfish/feeder/cmd"
 MQTT_TOPIC_STATUS = "goldfish/feeder/status"

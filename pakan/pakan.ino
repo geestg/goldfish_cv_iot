@@ -10,7 +10,7 @@ const char* WIFI_SSID = "Efeeder";
 const char* WIFI_PASS = "11111111";
 
 /* ================= MQTT ================= */
-const char* MQTT_BROKER = "10.189.223.133";
+const char* MQTT_BROKER = "10.106.138.133";
 const int   MQTT_PORT   = 1883;
 const char* TOPIC_CMD  = "goldfish/feeder/cmd";
 

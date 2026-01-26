@@ -8,7 +8,7 @@ from ultralytics import YOLO
 # ===============================
 MODEL_PATH = "models/best.pt"
 DATASET_DIR = "kalibrasi_images"   # folder berisi beberapa foto kalibrasi
-CONF_THRESHOLD = 0.70              # confidence minimal agar ikan dianggap valid
+CONF_THRESHOLD = 0.30              # confidence minimal agar ikan dianggap valid
 
 # ===============================
 # INPUT PANJANG ASLI

@@ -40,7 +40,7 @@ MODEL_PATH = os.path.join(BASE_DIR, "models", "best.pt")
 STREAM_SNAPSHOT_DIR = os.path.join(BASE_DIR, "snapshot")
 STREAM_VIDEO_DIR = os.path.join(BASE_DIR, "video_stream")
 
-RTSP_URL = "http://10.38.193.136:4747/video"  # sesuaikan
+RTSP_URL = "http://10.106.138.136:4747/video"  # sesuaikan
 
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(WEB_OUTPUT_IMAGE, exist_ok=True)
@@ -49,15 +49,15 @@ os.makedirs(STREAM_SNAPSHOT_DIR, exist_ok=True)
 os.makedirs(STREAM_VIDEO_DIR, exist_ok=True)
 
 # ================== PARAMETER KALIBRASI =====================
-PX_PER_CM = 14.6924
+PX_PER_CM = 15.60
 
 # ================== PARAMETER FILTER DETEKSI =================
-CONF_THRESHOLD = 0.60
-MIN_LENGTH_PX = 40.0
-BORDER_MARGIN = 0.08
+CONF_THRESHOLD = 0.30
+MIN_LENGTH_PX = 25.0
+BORDER_MARGIN = 0.03
 
 # ================= MQTT CONFIG =================
-MQTT_BROKER = "172.27.27.133"
+MQTT_BROKER = "10.189.223.133"
 MQTT_PORT = 1883
 MQTT_TOPIC_FEED = "goldfish/feeder/cmd"
 MQTT_TOPIC_STATUS = "goldfish/feeder/status"
@@ -209,7 +209,12 @@ def analyze_image(img_path):
     if img is None:
         raise RuntimeError(f"Gagal membaca gambar: {img_path}")
 
-    res = model(img)[0]
+    res = model(
+        img,
+        conf=0.25,
+        imgsz=960
+    )[0]
+
 
     annotated = img.copy()
     records = []
